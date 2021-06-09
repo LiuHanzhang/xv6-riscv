@@ -77,6 +77,8 @@ kvminithart()
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..11 -- 12 bits of byte offset within the page.
+//
+// VA->PA translation is done by MMU. But initialization and page fault is handled by software/kernel
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
@@ -88,10 +90,10 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
-      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0) // allocate new next-level pagetable
         return 0;
-      memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+      memset(pagetable, 0, PGSIZE); // set new next-level pagetable zero
+      *pte = PA2PTE(pagetable) | PTE_V; // set pte addr of next-level pagetable and validate
     }
   }
   return &pagetable[PX(0, va)];
@@ -266,7 +268,7 @@ freewalk(pagetable_t pagetable)
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ //NOTE: priority: == > &&
       // this PTE points to a lower-level page table.
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
@@ -345,6 +347,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
+  // dstva may not be page-aligned
+  // draw an illustration and you will see how this code works
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);

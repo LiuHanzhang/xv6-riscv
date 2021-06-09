@@ -35,10 +35,10 @@ struct dinode {
   short minor;          // Minor device number (T_DEVICE only)
   short nlink;          // Number of links to inode in file system
   uint size;            // Size of file (bytes)
-  uint addrs[NDIRECT+1];   // Data block addresses
+  uint addrs[NDIRECT+1];   // Data block addresses (block no)
 };
 
-// Inodes per block.
+// Inodes per block. sizeof(struct dinode) = 64 Bytes
 #define IPB           (BSIZE / sizeof(struct dinode))
 
 // Block containing inode i
@@ -53,6 +53,7 @@ struct dinode {
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14
 
+// dirent structures form the content of a directory as a file/dinode
 struct dirent {
   ushort inum;
   char name[DIRSIZ];

@@ -323,9 +323,8 @@ sfence_vma()
 #define PGSIZE 4096 // bytes per page
 #define PGSHIFT 12  // bits of offset within a page
 
-#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
-#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
-
+#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1)) // round up sz to 4096(PGSIZE) aligned
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1)) // make last 12 bits of addr zero; round down a to 4096-fold, e.g. 
 #define PTE_V (1L << 0) // valid
 #define PTE_R (1L << 1)
 #define PTE_W (1L << 2)

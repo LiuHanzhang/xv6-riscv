@@ -15,7 +15,7 @@
 #define static_assert(a, b) do { switch (0) case 0: case (a): ; } while (0)
 #endif
 
-#define NINODES 200
+#define NINODES 200 // num of on-disk inodes, as opposed NINODE, which is the num of in-mem inodes
 
 // Disk layout:
 // [ boot block | sb block | log | inode blocks | free bit map | data blocks ]

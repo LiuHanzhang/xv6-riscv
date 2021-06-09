@@ -54,11 +54,11 @@ kfree(void *pa)
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+  r = (struct run*)pa; // store each free page's run structure in the free page itself
 
   acquire(&kmem.lock);
   r->next = kmem.freelist;
-  kmem.freelist = r;
+  kmem.freelist = r; // freelist is organized high pa -> low pa
   release(&kmem.lock);
 }
 

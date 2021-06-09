@@ -43,6 +43,8 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
+  // the kernel writes the address of its trap handler here; 
+  // the RISC-V jumps here to handle a trap.
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
@@ -64,7 +66,7 @@ usertrap(void)
     // so don't enable until done with those registers.
     intr_on();
 
-    syscall();
+    syscall(); // syscall() writes return value in p->trapframe->a0
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -102,7 +104,7 @@ usertrapret(void)
   // set up trapframe values that uservec will need when
   // the process next re-enters the kernel.
   p->trapframe->kernel_satp = r_satp();         // kernel page table
-  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack TODO: Why + PGSIZE?
   p->trapframe->kernel_trap = (uint64)usertrap;
   p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
 

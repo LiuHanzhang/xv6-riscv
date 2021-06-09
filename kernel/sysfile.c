@@ -132,7 +132,7 @@ sys_link(void)
   }
 
   ilock(ip);
-  if(ip->type == T_DIR){
+  if(ip->type == T_DIR){ // NOTE: Hard link cannot link to a directory
     iunlockput(ip);
     end_op();
     return -1;
@@ -181,6 +181,7 @@ isdirempty(struct inode *dp)
   return 1;
 }
 
+// Delete a path. If refcnt of the inode that this path points to drops to zero, delete the inode
 uint64
 sys_unlink(void)
 {
@@ -210,7 +211,7 @@ sys_unlink(void)
 
   if(ip->nlink < 1)
     panic("unlink: nlink < 1");
-  if(ip->type == T_DIR && !isdirempty(ip)){
+  if(ip->type == T_DIR && !isdirempty(ip)){ // NOTE: Only is the directory empty can we delete it
     iunlockput(ip);
     goto bad;
   }
@@ -219,7 +220,7 @@ sys_unlink(void)
   if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
     panic("unlink: writei");
   if(ip->type == T_DIR){
-    dp->nlink--;
+    dp->nlink--; // NOTE: if ip->type = T_DIR, its ".." links to dp
     iupdate(dp);
   }
   iunlockput(dp);
@@ -252,7 +253,7 @@ create(char *path, short type, short major, short minor)
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
-    if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
+    if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE)) // TODO: WHy ip->type = T_DEVICE is also acceptable?
       return ip;
     iunlockput(ip);
     return 0;
@@ -268,9 +269,9 @@ create(char *path, short type, short major, short minor)
   iupdate(ip);
 
   if(type == T_DIR){  // Create . and .. entries.
-    dp->nlink++;  // for ".."
+    dp->nlink++;  // NOTE: for ".."
     iupdate(dp);
-    // No ip->nlink++ for ".": avoid cyclic ref count.
+    // NOTE: No ip->nlink++ for ".": avoid cyclic ref count.
     if(dirlink(ip, ".", ip->inum) < 0 || dirlink(ip, "..", dp->inum) < 0)
       panic("create dots");
   }

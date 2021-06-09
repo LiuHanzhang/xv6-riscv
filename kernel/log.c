@@ -42,7 +42,7 @@ struct log {
   int start;
   int size;
   int outstanding; // how many FS sys calls are executing.
-  int committing;  // in commit(), please wait.
+  int committing;  // in commit(), please wait. Protected by the spinlock. TODO: Why not a sleeplock?
   int dev;
   struct logheader lh;
 };
@@ -74,6 +74,8 @@ install_trans(int recovering)
     struct buf *lbuf = bread(log.dev, log.start+tail+1); // read log block
     struct buf *dbuf = bread(log.dev, log.lh.block[tail]); // read dst
     memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
+    // NOTE: We can optimize above 3 lines of codes, e.g., if possible, don't read the log block,
+    // just directly copy the bcache to the dst
     bwrite(dbuf);  // write dst to disk
     if(recovering == 0)
       bunpin(dbuf);
@@ -109,7 +111,7 @@ write_head(void)
   for (i = 0; i < log.lh.n; i++) {
     hb->block[i] = log.lh.block[i];
   }
-  bwrite(buf);
+  bwrite(buf); // NOTE: The real commit point.
   brelse(buf);
 }
 
@@ -194,8 +196,8 @@ static void
 commit()
 {
   if (log.lh.n > 0) {
-    write_log();     // Write modified blocks from cache to log
-    write_head();    // Write header to disk -- the real commit
+    write_log();     // Write modified blocks from cache to log NOTE: Cache -> log on disk -> block on disk
+    write_head();    // Write header to disk -- NOTE: the real commit point
     install_trans(0); // Now install writes to home locations
     log.lh.n = 0;
     write_head();    // Erase the transaction from the log

@@ -96,8 +96,8 @@ userret:
         csrw satp, a1
         sfence.vma zero, zero
 
-        # put the saved user a0 in sscratch, so we
-        # can swap it with our a0 (TRAPFRAME) in the last step.
+        # put the saved user a0, which is the returned value of sys call, in sscratch,
+        # so we can swap it with our a0 (TRAPFRAME) in the last step.
         ld t0, 112(a0)
         csrw sscratch, t0
 
@@ -138,4 +138,4 @@ userret:
         
         # return to user mode and user pc.
         # usertrapret() set up sstatus and sepc.
-        sret
+        sret # NOTE: re-enalbe interrupts?

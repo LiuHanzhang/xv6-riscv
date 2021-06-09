@@ -44,11 +44,17 @@ binit(void)
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
+    // when init the doubly linked list, b is the most recently used/init block.
+    // when insert b into this dobuly linked list, we insert b to the next of head, to the prev of previous head.next
+    // according to the rule that head.next is most recent, head.prev is least recent.
+    // on this linked list, in the order of "next" starting from head, blocks (buf cache) are less recent,
+    // in the order of "prev" starting from head, blocks are more recent.
+    b->next = bcache.head.next; // b->next should be the most recently init block during last iteration
+    b->prev = &bcache.head; // b->next should be the most recently init block during last iteration
     initsleeplock(&b->lock, "buffer");
     bcache.head.next->prev = b;
     bcache.head.next = b;
+    // inserting b into this doubly linked list need 4 updates.
   }
 }
 
@@ -64,7 +70,7 @@ bget(uint dev, uint blockno)
 
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
-    if(b->dev == dev && b->blockno == blockno){
+    if(b->dev == dev && b->blockno == blockno){ // NOTE: Don't have to check if b->refcnt > 0, cause we didn't evict it on brelse
       b->refcnt++;
       release(&bcache.lock);
       acquiresleep(&b->lock);
@@ -113,6 +119,7 @@ bwrite(struct buf *b)
 
 // Release a locked buffer.
 // Move to the head of the most-recently-used list.
+// TODO: Why moving the buffer to the most-recently-used position on release, not on bread/bget/bwrite?    
 void
 brelse(struct buf *b)
 {
@@ -124,7 +131,10 @@ brelse(struct buf *b)
   acquire(&bcache.lock);
   b->refcnt--;
   if (b->refcnt == 0) {
-    // no one is waiting for it.
+    // no one is waiting for it. 
+    // TODO: Why not put write back there?
+    // In xv6, If the caller does modify thebuffer, 
+    // it must call bwrite to write the changed data to disk before releasing the buffer
     b->next->prev = b->prev;
     b->prev->next = b->next;
     b->next = bcache.head.next;

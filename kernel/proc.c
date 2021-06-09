@@ -513,6 +513,7 @@ forkret(void)
   release(&myproc()->lock);
 
   if (first) {
+    // TODO: ??? why sleep cannot be called from kernel space? How does acquiresleep call sleep?
     // File system initialization must be run in the context of a
     // regular process (e.g., because it calls sleep), and thus cannot
     // be run from main().

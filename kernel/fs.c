@@ -68,16 +68,19 @@ balloc(uint dev)
   struct buf *bp;
 
   bp = 0;
-  for(b = 0; b < sb.size; b += BPB){
-    bp = bread(dev, BBLOCK(b, sb));
-    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
+  for(b = 0; b < sb.size; b += BPB){ 
+    // Q: What's the use of outer loop? sb.size = 1000(blocks), BPB(bits per block) = 1024 * 8
+    // A: The outer loop reads each block of bitmap. In xv6, there are 1000 blocks, and a bitmap block can represent 1024 * 8 blocks
+    //    So there is only one bitmap block, i.e., block 45.
+    bp = bread(dev, BBLOCK(b, sb)); // bread(1, 45), bp = pointer to the buffer cache of bitmap block
+    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){ // The inner loop checks all BPB bits in a single bitmap block.
       m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
         bp->data[bi/8] |= m;  // Mark block in use.
         log_write(bp);
         brelse(bp);
         bzero(dev, b + bi);
-        return b + bi;
+        return b + bi; // Return the free block no.
       }
     }
     brelse(bp);
@@ -86,6 +89,7 @@ balloc(uint dev)
 }
 
 // Free a disk block.
+// NOTE: This function leaves the to-be-freed disk block as it is, just unmark it in bitmap block
 static void
 bfree(int dev, uint b)
 {
@@ -97,7 +101,7 @@ bfree(int dev, uint b)
   m = 1 << (bi % 8);
   if((bp->data[bi/8] & m) == 0)
     panic("freeing free block");
-  bp->data[bi/8] &= ~m;
+  bp->data[bi/8] &= ~m; // Mark block free.
   log_write(bp);
   brelse(bp);
 }
@@ -199,15 +203,15 @@ ialloc(uint dev, short type)
   struct buf *bp;
   struct dinode *dip;
 
-  for(inum = 1; inum < sb.ninodes; inum++){
-    bp = bread(dev, IBLOCK(inum, sb));
-    dip = (struct dinode*)bp->data + inum%IPB;
+  for(inum = 1; inum < sb.ninodes; inum++){ // sb.ninodes = 200
+    bp = bread(dev, IBLOCK(inum, sb)); // bp points to the block containning the new dinode
+    dip = (struct dinode*)bp->data + inum%IPB; //dip points to the new dinode
     if(dip->type == 0){  // a free inode
       memset(dip, 0, sizeof(*dip));
       dip->type = type;
-      log_write(bp);   // mark it allocated on the disk
-      brelse(bp);
-      return iget(dev, inum);
+      log_write(bp); // mark the dinode allocated by writing the bcache to the disk
+      brelse(bp); // release bcache NOTE: write bcache back occurs in log_write(bp), not in brelse(bp)
+      return iget(dev, inum); // now with the inum, get the in-memory inode
     }
     brelse(bp);
   }
@@ -218,6 +222,7 @@ ialloc(uint dev, short type)
 // Must be called after every change to an ip->xxx field
 // that lives on disk.
 // Caller must hold ip->lock.
+// TODO: Can we see iupdate as an opposite of ilock?
 void
 iupdate(struct inode *ip)
 {
@@ -232,7 +237,7 @@ iupdate(struct inode *ip)
   dip->nlink = ip->nlink;
   dip->size = ip->size;
   memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
-  log_write(bp);
+  log_write(bp); // NOTE: aha! buffer cache write back is here!
   brelse(bp);
 }
 
@@ -254,7 +259,7 @@ iget(uint dev, uint inum)
       release(&itable.lock);
       return ip;
     }
-    if(empty == 0 && ip->ref == 0)    // Remember empty slot.
+    if(empty == 0 && ip->ref == 0) // Remember the first empty slot while scanning through the itabel.inode[]
       empty = ip;
   }
 
@@ -296,14 +301,20 @@ ilock(struct inode *ip)
 
   acquiresleep(&ip->lock);
 
-  if(ip->valid == 0){
-    bp = bread(ip->dev, IBLOCK(ip->inum, sb));
+  if(ip->valid == 0){ // then read from the disk
+    // bread() may read dinode from buffer cache, or may fetch it from the disk. 
+    // Inode layer is a higher abstraction than buffer cache layer.
+    bp = bread(ip->dev, IBLOCK(ip->inum, sb)); 
     dip = (struct dinode*)bp->data + ip->inum%IPB;
     ip->type = dip->type;
     ip->major = dip->major;
     ip->minor = dip->minor;
     ip->nlink = dip->nlink;
     ip->size = dip->size;
+    // NOTE: A surprising fact: sizeof(arr) = size of the whole array, not the size of array variable as a pointer
+    // https://blog.csdn.net/ljob2006/article/details/4872167
+    // https://www.zhihu.com/question/362176701
+    // https://www.zhihu.com/question/41805285
     memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
     brelse(bp);
     ip->valid = 1;
@@ -334,7 +345,7 @@ iput(struct inode *ip)
 {
   acquire(&itable.lock);
 
-  if(ip->ref == 1 && ip->valid && ip->nlink == 0){
+  if(ip->ref == 1 && ip->valid && ip->nlink == 0){ // TODO: Why to make sure ip->valid?
     // inode has no links and no other references: truncate and free.
 
     // ip->ref == 1 means no other process can have ip locked,
@@ -388,10 +399,11 @@ bmap(struct inode *ip, uint bn)
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
+    // Load singly indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     bp = bread(ip->dev, addr);
+    // Read singly indirect data block no., allocating if necessary
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
@@ -460,12 +472,12 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 
   if(off > ip->size || off + n < off)
     return 0;
-  if(off + n > ip->size)
+  if(off + n > ip->size) // NOTE: readi cannot read beyond file size
     n = ip->size - off;
 
   for(tot=0; tot<n; tot+=m, off+=m, dst+=m){
     bp = bread(ip->dev, bmap(ip, off/BSIZE));
-    m = min(n - tot, BSIZE - off%BSIZE);
+    m = min(n - tot, BSIZE - off%BSIZE); // check which comes first, the end of n bytes or the end of current block?
     if(either_copyout(user_dst, dst, bp->data + (off % BSIZE), m) == -1) {
       brelse(bp);
       tot = -1;
@@ -473,7 +485,7 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
     }
     brelse(bp);
   }
-  return tot;
+  return tot; // return read bytes in total
 }
 
 // Write data to inode.
@@ -536,6 +548,9 @@ dirlookup(struct inode *dp, char *name, uint *poff)
     panic("dirlookup not DIR");
 
   for(off = 0; off < dp->size; off += sizeof(de)){
+    // NOTE: Now you see. The directory layer is on top of inode layer
+    // The directory is treaded as a file. 
+    // We use readi to read from the dirctory inode, not directly from the block; and readi use bread to read from buffer cache / blocks
     if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
       panic("dirlookup read");
     if(de.inum == 0)
